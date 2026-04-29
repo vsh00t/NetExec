@@ -690,27 +690,57 @@ class smb(connection):
         if self.args.no_admin_check:
             return
         self.logger.debug(f"Checking if user is admin on {self.host}")
+
+        # --- Check 1: SVCCTL with minimal access (stealth) ---
         rpctransport = SMBTransport(self.conn.getRemoteHost(), 445, r"\svcctl", smb_connection=self.conn)
         dce = rpctransport.get_dce_rpc()
         try:
             dce.connect()
         except Exception:
-            self.admin_privs = False
+            pass
         else:
             with contextlib.suppress(Exception):
                 dce.bind(scmr.MSRPC_UUID_SCMR)
             try:
-                # Use minimum required access (SC_MANAGER_CONNECT = 0x0004)
-                # instead of SC_MANAGER_ALL_ACCESS (0xF003F) which is a known EDR signature
-                scmrobj = scmr.hROpenSCManagerW(dce, f"{self.host}\x00", "ServicesActive\x00", 0x0004)
+                # SC_MANAGER_CONNECT (0x0004) | SC_MANAGER_ENUMERATE_SERVICE (0xF0000)
+                # Minimal rights to enumerate services - avoids 0xF003F EDR signature
+                scmrobj = scmr.hROpenSCManagerW(dce, f"{self.host}\x00", "ServicesActive\x00", 0xF0004)
                 scmr.hREnumServicesStatusW(dce, scmrobj["lpScHandle"])
-                self.logger.debug(f"User is admin on {self.host}!")
+                self.logger.debug(f"User is admin on {self.host} (SVCCTL)!")
                 self.admin_privs = True
+                return
             except scmr.DCERPCException:
-                self.admin_privs = False
+                self.logger.debug(f"SVCCTL enum failed, trying fallback")
             except Exception as e:
-                self.logger.fail(f"Error checking if user is admin on {self.host}: {e}")
-                self.admin_privs = False
+                self.logger.debug(f"SVCCTL check error: {e}")
+
+        # --- Check 2: Fallback - write test on ADMIN$ ---
+        try:
+            tid = self.conn.connectTree("ADMIN$")
+            fid = self.conn.createFile(tid, "\\__nxc_admin_check__", desiredAccess=0x00000002, shareMode=1, creationOptions=0x00000040)
+            self.conn.close(tid, fid)
+            self.logger.debug(f"User is admin on {self.host} (ADMIN$ write)!")
+            self.admin_privs = True
+            return
+        except Exception:
+            self.logger.debug(f"ADMIN$ write test failed, trying fallback")
+
+        # --- Check 3: Fallback - read HKLM\SAM via winreg ---
+        try:
+            rpctransport2 = SMBTransport(self.conn.getRemoteHost(), 445, r"\winreg", smb_connection=self.conn)
+            dce2 = rpctransport2.get_dce_rpc()
+            dce2.connect()
+            with contextlib.suppress(Exception):
+                dce2.bind(rrp.MSRPC_UUID_RRP)
+            resp = rrp.hOpenLocalMachineW(dce2, "HKLM\x00")
+            hKey = resp["phKey"]
+            rrp.hBaseRegOpenKey(dce2, hKey, "SAM\SAM\x00")
+            self.logger.debug(f"User is admin on {self.host} (HKLM\SAM)!")
+            self.admin_privs = True
+            return
+        except Exception:
+            self.logger.debug(f"HKLM registry check failed")
+            self.admin_privs = False
 
     def gen_relay_list(self):
         if self.server_os.lower().find("windows") != -1 and self.signing is False:
