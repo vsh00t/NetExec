@@ -1,5 +1,6 @@
 import ntpath
 import os
+import random
 from time import sleep
 from nxc.connection import dcom_FirewallChecker
 from nxc.helpers.misc import gen_random_string
@@ -143,7 +144,7 @@ class WMIEXEC:
 
         tries = 1
         # Give the command a bit of time to execute before we try to read the output, 0.4 seconds was good in testing
-        sleep(0.4)
+        sleep(0.4 + random.uniform(0, 0.3))
         while True:
             try:
                 self.logger.info(f"Attempting to read {self.__share}\\{self.__output}")

@@ -4,8 +4,30 @@ import os
 import re
 import struct
 import ipaddress
+import random
 from Cryptodome.Hash import MD4
 from textwrap import dedent
+
+# Monkey-patch Impacket's HTTP transport User-Agent to avoid Python-urllib signature
+try:
+    from impacket.dcerpc.v5 import transport as _imp_transport
+    if hasattr(_imp_transport, 'HTTPTransport'):
+        _original_init = _imp_transport.HTTPTransport.__init__
+        _patched_ua = random.choice([
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Microsoft-CryptoAPI/10.0",
+            "Microsoft-WNS/10.0",
+            "Microsoft-WebDAV-MiniRedir/10.0",
+        ])
+        def _patched_http_init(self, *args, **kwargs):
+            _original_init(self, *args, **kwargs)
+            if hasattr(self, '_HttpConnection__headers'):
+                self._HttpConnection__headers['User-Agent'] = _patched_ua
+            elif hasattr(self, 'headers'):
+                self.headers['User-Agent'] = _patched_ua
+        _imp_transport.HTTPTransport.__init__ = _patched_http_init
+except Exception:
+    pass
 
 from impacket.smbconnection import SMBConnection, SessionError
 from impacket.smb import SMB_DIALECT
@@ -57,7 +79,9 @@ from nxc.protocols.ldap.gmsa import MSDS_MANAGEDPASSWORD_BLOB
 from nxc.helpers.logger import highlight
 from nxc.helpers.bloodhound import add_user_bh
 from nxc.helpers.powershell import create_ps_command
-from nxc.helpers.misc import detect_if_ip
+import random
+
+from nxc.helpers.misc import detect_if_ip, gen_random_string
 from nxc.protocols.ldap.resolution import LDAPResolution
 
 from dploot.triage.vaults import VaultsTriage
@@ -72,7 +96,12 @@ from traceback import format_exc
 from termcolor import colored
 import contextlib
 
-smb_share_name = gen_random_string(5).upper()
+LEGIT_SHARE_NAMES = [
+    "SHARE-01", "DATA", "FILES", "BACKUP", "ARCHIVE",
+    "USERS", "DEPLOY", "UPDATE", "TEMP", "CACHE",
+]
+
+smb_share_name = random.choice(LEGIT_SHARE_NAMES)
 
 smb_error_status = [
     "STATUS_ACCOUNT_DISABLED",
@@ -291,6 +320,15 @@ class smb(connection):
 
         # DCOM connection with kerberos needed
         self.remoteName = self.host if not self.kerberos else f"{self.hostname}.{self.targetDomain}"
+
+        # Spoof NTLM workstation name to avoid identifying strings
+        if hasattr(self.args, 'computer_name') and self.args.computer_name:
+            self.remoteName = self.args.computer_name
+        elif not self.kerberos:
+            import string as string_mod
+            workstation_prefix = random.choice(["DESKTOP", "WS", "WKS", "CLT", "PC"])
+            workstation_suffix = ''.join(random.choices(string_mod.ascii_uppercase + string_mod.digits, k=7))
+            self.remoteName = f"{workstation_prefix}-{workstation_suffix}"
 
         # using kdcHost is buggy on impacket when using trust relation between ad so we kdcHost must stay to none if targetdomain is not equal to domain
         if not self.kdcHost and self.domain and self.domain == self.targetDomain:
@@ -662,9 +700,9 @@ class smb(connection):
             with contextlib.suppress(Exception):
                 dce.bind(scmr.MSRPC_UUID_SCMR)
             try:
-                # 0xF003F - SC_MANAGER_ALL_ACCESS
-                # http://msdn.microsoft.com/en-us/library/windows/desktop/ms685981(v=vs.85).aspx
-                scmrobj = scmr.hROpenSCManagerW(dce, f"{self.host}\x00", "ServicesActive\x00", 0xF003F)
+                # Use minimum required access (SC_MANAGER_CONNECT = 0x0004)
+                # instead of SC_MANAGER_ALL_ACCESS (0xF003F) which is a known EDR signature
+                scmrobj = scmr.hROpenSCManagerW(dce, f"{self.host}\x00", "ServicesActive\x00", 0x0004)
                 scmr.hREnumServicesStatusW(dce, scmrobj["lpScHandle"])
                 self.logger.debug(f"User is admin on {self.host}!")
                 self.admin_privs = True

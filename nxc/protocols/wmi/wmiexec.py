@@ -71,8 +71,8 @@ class WMIEXEC:
         self.logger.info(f"Waiting {self.__exec_timeout}s for command to complete.")
         time.sleep(self.__exec_timeout)
 
-        # 2. Base64 encode the file
-        self.execute_remote(f"{self.__shell} certutil -encodehex -f {result_output} {result_output_b64} 0x40000001")
+        # 2. Base64 encode the file using PowerShell (replaces certutil which is a known IOC)
+        self.execute_remote(f'powershell -Command "[Convert]::ToBase64String([IO.File]::ReadAllBytes(\'{result_output}\')) | Out-File -Encoding ASCII \'{result_output_b64}\'"')
         time.sleep(0.5)
 
         # 3. Store content in registry

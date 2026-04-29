@@ -98,6 +98,7 @@ def proto_args(parser, parents):
     cmd_exec_group.add_argument("--get-output-tries", help="Number of times atexec/smbexec/mmcexec tries to get results", type=int, default=10)
     cmd_exec_group.add_argument("--codec", default="utf-8", help="Set encoding used (codec) from the target's output. If errors are detected, run chcp.com at the target & map the result with https://docs.python.org/3/library/codecs.html#standard-encodings and then execute again with --codec and the corresponding codec")
     cmd_exec_group.add_argument("--no-output", action="store_true", help="do not retrieve command output")
+    cmd_exec_group.add_argument("--computer-name", metavar="NAME", dest="computer_name", type=str, default=None, help="Spoof NTLM workstation name in authentication (e.g. DESKTOP-A1B2C3D). Random name used if not specified.")
 
     cmd_exec_method_group = cmd_exec_group.add_mutually_exclusive_group()
     cmd_exec_method_group.add_argument("-x", metavar="COMMAND", dest="execute", help="execute the specified CMD command")

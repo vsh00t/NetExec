@@ -33,7 +33,16 @@ class TSCH_EXEC:
         self.logger = logger
 
         # Optional args for finetuning the task execution, e.g. used in nxc/modules/schtask_as.py
-        self.task_name = task_name if task_name else gen_random_string(8)
+        if task_name:
+            self.task_name = task_name
+        else:
+            LEGIT_TASK_NAMES = [
+                "UserTask", "SystemTask", "AppUpdate", "SvcConfig",
+                "NetworkDiag", "PerfDiagnostic", "DiskCleanup", "SvcHost",
+                "SysHealth", "NetReconnect", "DriverSync", "RegBackup",
+                "ProfileSync", "SecurityScan", "CertRenewal", "WpnService",
+            ]
+            self.task_name = random.choice(LEGIT_TASK_NAMES) + f"-{random.randint(1000, 9999)}"
         self.run_task_as = run_task_as
         self.run_cmd = run_cmd
         self.output_filename = output_filename
@@ -215,7 +224,7 @@ class TSCH_EXEC:
             smbConnection = self.__rpctransport.get_smb_connection()
             tries = 1
             # Give the command a bit of time to execute before we try to read the output, 0.4 seconds was good in testing
-            sleep(0.4)
+            sleep(0.4 + random.uniform(0, 0.3))
             while True:
                 try:
                     self.logger.info(f"Attempting to read {self.__share}\\{self.__output_filename}")
